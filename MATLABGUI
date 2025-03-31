@@ -1,0 +1,157 @@
+function vesicleTraceGUI
+    % Create figure
+    f = figure('Name', 'Vesicle/FRET Trace Annotator', 'NumberTitle', 'off', ...
+        'Position', [100 100 900 600], 'Color', 'w');
+
+    % UI Controls
+    uicontrol(f, 'Style', 'pushbutton', 'String', 'Load Excel', ...
+        'Position', [30 550 100 30], 'Callback', @loadExcel);
+    
+    uicontrol(f, 'Style', 'pushbutton', 'String', 'Next Pair', ...
+        'Position', [150 550 100 30], 'Callback', @nextPair);
+    
+    uicontrol(f, 'Style', 'pushbutton', 'String', 'Select Range', ...
+        'Position', [270 550 120 30], 'Callback', @selectRange);
+    
+    uicontrol(f, 'Style', 'pushbutton', 'String', 'Save Selection', ...
+        'Position', [410 550 120 30], 'Callback', @saveSelection);
+    
+    uicontrol(f, 'Style', 'text', 'Position', [540 550 100 30], 'String', 'Selected Points:', 'HorizontalAlignment', 'right');
+    pointsCountBox = uicontrol(f, 'Style', 'edit', 'Position', [650 555 100 25], 'Enable', 'off');
+    
+    uicontrol(f, 'Style', 'text', 'Position', [760 550 70 30], 'String', 'Mean Ratio:', 'HorizontalAlignment', 'right');
+    meanRatioBox = uicontrol(f, 'Style', 'edit', 'Position', [830 555 70 25], 'Enable', 'off');
+
+    % Axes
+    ax = axes(f, 'Position', [0.1 0.15 0.85 0.7]);
+
+    % Shared data
+    data = struct('pairIndex', 1);
+
+    % Callback: Load Excel
+    function loadExcel(~, ~)
+        [file, path] = uigetfile({'*.xlsx;*.xls'}, 'Select Excel File');
+        if isequal(file,0), return; end
+
+        fullFile = fullfile(path, file);
+        data.table = readtable(fullFile);
+        data.filename = file;
+        data.pairIndex = 1;
+        showCurrentPair();
+    end
+
+    % Callback: Show Next Pair
+    function nextPair(~, ~)
+        if ~isfield(data, 'table'), return; end
+        data.pairIndex = data.pairIndex + 1;
+        if isfield(data, 'selectedRange'), rmfield(data, 'selectedRange'); end
+        showCurrentPair();
+    end
+
+    % Display current pair
+    function showCurrentPair()
+        t = data.table{:, 1};
+        vesCol = 2 * data.pairIndex;
+        ratioCol = vesCol + 1;
+
+        if ratioCol > size(data.table, 2)
+            msgbox('No more pairs.');
+            return;
+        end
+
+        ves = data.table{:, vesCol};
+        ratio = data.table{:, ratioCol};
+
+        data.time = t;
+        data.vesicle = ves;
+        data.ratio = ratio;
+
+        cla(ax);
+        yyaxis(ax, 'left');
+        plot(ax, t, ves, '-g', 'LineWidth', 1.5);
+        ylabel(ax, 'Vesicle Intensity');
+        
+        yyaxis(ax, 'right');
+        plot(ax, t, ratio, '-r', 'LineWidth', 1.5);
+        ylabel(ax, 'FRET Ratio');
+        
+        % Highlight selected range if exists
+        if isfield(data, 'selectedRange')
+            hold(ax, 'on');
+            rangeIdx = data.selectedRange.idx;
+            yyaxis(ax, 'left');
+            plot(ax, t(rangeIdx), ves(rangeIdx), 'go', 'MarkerSize', 4);
+            yyaxis(ax, 'right');
+            plot(ax, t(rangeIdx), ratio(rangeIdx), 'ro', 'MarkerSize', 4);
+            hold(ax, 'off');
+            
+            set(pointsCountBox, 'String', num2str(length(rangeIdx)));
+            set(meanRatioBox, 'String', sprintf('%.3f', mean(ratio(rangeIdx))));
+        end
+        
+        title(ax, sprintf('Pair %d: Vesicle (green) & FRET Ratio (red)', data.pairIndex));
+        xlabel(ax, 'Time (s)');
+        legend(ax, {'Vesicle', 'FRET Ratio'}, 'Location', 'best');
+    end
+
+    % Select range on vesicle trace and capture corresponding ratio
+    function selectRange(~, ~)
+        if ~isfield(data, 'vesicle')
+            errordlg('Load data first!'); return;
+        end
+        
+        title(ax, 'Select START and END points on vesicle trace');
+        drawnow;
+        
+        try
+            % Get two points from user
+            [x, ~] = ginput(2);
+            x = sort(x); % Ensure chronological order
+            
+            % Find closest time points
+            [~, startIdx] = min(abs(data.time - x(1)));
+            [~, endIdx] = min(abs(data.time - x(2)));
+            
+            % Store all indices between start and end
+            rangeIdx = startIdx:endIdx;
+            
+            % Store the selection
+            data.selectedRange = struct(...
+                'startTime', data.time(startIdx), ...
+                'endTime', data.time(endIdx), ...
+                'idx', rangeIdx, ...
+                'vesicleValues', data.vesicle(rangeIdx), ...
+                'ratioValues', data.ratio(rangeIdx));
+            
+            showCurrentPair();
+            title(ax, sprintf('Selected %.1fs to %.1fs (%d points)', ...
+                data.time(startIdx), data.time(endIdx), length(rangeIdx)));
+            
+        catch
+            title(ax, 'Range selection cancelled');
+        end
+    end
+
+    % Save the selected data
+    function saveSelection(~, ~)
+        if ~isfield(data, 'selectedRange')
+            errordlg('Select a range first!'); return;
+        end
+        
+        [file, path] = uiputfile('*.mat', 'Save Selection As');
+        if isequal(file, 0), return; end
+        
+        selection = struct(...
+            'filename', data.filename, ...
+            'pairIndex', data.pairIndex, ...
+            'timeRange', [data.selectedRange.startTime, data.selectedRange.endTime], ...
+            'timePoints', data.time(data.selectedRange.idx), ...
+            'vesicleValues', data.selectedRange.vesicleValues, ...
+            'ratioValues', data.selectedRange.ratioValues, ...
+            'meanRatio', mean(data.selectedRange.ratioValues));
+        
+        save(fullfile(path, file), 'selection');
+        msgbox(sprintf('Saved %d points (%.3f mean ratio)', ...
+            length(data.selectedRange.idx), selection.meanRatio));
+    end
+end
