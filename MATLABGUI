@@ -155,3 +155,27 @@ function vesicleTraceGUI
             length(data.selectedRange.idx), selection.meanRatio));
     end
 end
+% Example Usage (assuming you have 'fretDropTimes' from your original script)
+fretDropTimes = [-2.5, -1.8, -3.1, -2.0, -2.7, -1.9, -2.3, -2.1, -2.9, -2.6, -2.2];
+
+[p_val, conf_interval] = analyzeFRETDropTimes(fretDropTimes);
+
+% Local function definition
+function [p_value, ci] = analyzeFRETDropTimes(fretDropTimes)
+    % ... (function code as before) ...
+    validFRET = fretDropTimes(~isnan(fretDropTimes));
+    n = length(validFRET);
+    numNegative = sum(validFRET < 0);
+    p_value = binocdf(numNegative - 1, n, 0.5, 'upper');
+    meanFRET = mean(validFRET);
+    stdFRET = std(validFRET);
+    semFRET = stdFRET / sqrt(n);
+    ci = meanFRET + [-1, 1] * tinv(0.975, n - 1) * semFRET;
+    fprintf('Sign Test Results:\n');
+    fprintf('  Number of negative FRET drop times: %d\n', numNegative);
+    fprintf('  Total number of valid FRET drop times: %d\n', n);
+    fprintf('  P-value: %.4f\n', p_value);
+    fprintf('Confidence Interval Results:\n');
+    fprintf('  Mean FRET drop onset: %.2f s\n', meanFRET);
+    fprintf('  95%% Confidence Interval: [%.2f, %.2f] s\n', ci(1), ci(2));
+end
